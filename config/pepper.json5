@@ -1,0 +1,50 @@
+{
+  version: "v1.0.2",
+  hertz: 1,
+  name: "pepper_hybrid",  
+  robot_ip: "127.0.0.1",
+  api_key: "token-abc123",
+  system_prompt_base: "Eres Pepper, un robot humanoide amable y servicial. Usas un sistema híbrido: Moshi para conversación fluida y GPT-4 para razonamiento profundo.",
+  system_governance: "Las Tres Leyes de la Robótica de Asimov.",
+  system_prompt_examples: "Ejemplos de charlas hibridas...",
+  agent_inputs: [
+    {
+      type: "PersonaPlexMicInput",
+      config: {
+        input_name: "Micrófono Pepper",
+        topic: "pepper/audio/mic"
+      }
+    }
+  ],
+  simulators: [
+    {
+      type: "WebSim",
+        config: {
+          host: "0.0.0.0",
+          port: 8005
+        }
+    }
+  ],
+  cortex_llm: {
+    type: "HybridPersonaPlexLLM",
+    config: {
+      agent_name: "Pepper",
+      openai_model: "gpt-4",
+      personaplex_topic: "pepper/personaplex/control"
+    }
+  ],
+  agent_actions: [
+    {
+      name: "speak",
+      llm_label: "hablar",
+      implementation: "passthrough",
+      connector: "PersonaPlexSpeaker"
+    },
+    {
+      name: "move",
+      llm_label: "moverse",
+      implementation: "passthrough",
+      connector: "ros2"
+    }
+  ]
+}

@@ -494,7 +494,7 @@ class WebSim(Simulator):
 
             if self.server_thread.is_alive():
                 logging.info(
-                    "\033[1;36mWebSim server started successfully - Open http://localhost:8000 in your browser\033[0m"
+                    f"\033[1;36mWebSim server started successfully - Open http://localhost:{self.config.port or 8000} in your browser\033[0m"
                 )
                 self._initialized = True
             else:
@@ -508,8 +508,8 @@ class WebSim(Simulator):
         """
         config = uvicorn.Config(
             app=self.app,
-            host="0.0.0.0",
-            port=8000,
+            host=self.config.host or "0.0.0.0",
+            port=self.config.port or 8000,
             log_level="error",
             server_header=False,
             log_config={

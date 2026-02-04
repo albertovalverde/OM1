@@ -19,7 +19,7 @@
       type: "WebSim",
       config: {
         host: "0.0.0.0",
-        port: 8000,
+        port: 8001,
         tick_rate: 100,
         auto_reconnect: true,
         debug_mode: false,
