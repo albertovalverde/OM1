@@ -578,53 +578,15 @@ class WebSim(Simulator):
         return earliest_time if earliest_time != float("inf") else 0.0
 
     def tick(self) -> None:
-        """Update simulator state."""
-        if self._initialized:
-            try:
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-
-                try:
-                    if loop.is_running():
-                        future = asyncio.run_coroutine_threadsafe(
-                            self.broadcast_state(), loop
-                        )
-                        try:
-                            future.result(timeout=1.0)
-                        except TimeoutError:
-                            logging.warning("Websim broadcast timed out")
-                    else:
-                        loop.run_until_complete(self.broadcast_state())
-                except Exception as e:
-                    logging.warning(f"Websim tick error: {e}")
-
-            except Exception as e:
-                logging.error(f"Error in tick: {e}")
-
-            self.sleep(0.5)
-
-    def sim(self, actions: List[Action]) -> None:
-        """
-        Handle simulation updates from commands.
-
-        Parameters
-        ----------
-        actions : List[Action]
-            List of actions to process in the simulation.
-        """
+        """Update simulator state and broadcast to clients."""
         if not self._initialized:
-            logging.warning("WebSim not initialized, skipping sim update")
             return
 
         try:
-            updated = False
+            # Update state with latest inputs in EVERY tick, regardless of Brain output
             with self._lock:
                 earliest_time = self.get_earliest_time(self.io_provider.inputs)
-                logging.debug(f"earliest_time: {earliest_time}")
-
+                
                 input_rezeroed = []
                 for input_type, input_info in self.io_provider.inputs.items():
                     timestamp = 0
@@ -660,6 +622,50 @@ class WebSim(Simulator):
                     "complete": llm_end_time - earliest_time if llm_end_time else 0,
                 }
 
+                self.state_dict = {
+                    "current_action": self.state.current_action,
+                    "last_speech": self.state.last_speech,
+                    "current_emotion": self.state.current_emotion,
+                    "system_latency": system_latency,
+                    "inputs": input_rezeroed,
+                }
+
+            # Broadcast the updated state
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            try:
+                if loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self.broadcast_state(), loop
+                    )
+                    try:
+                        future.result(timeout=1.0)
+                    except TimeoutError:
+                        logging.warning("Websim broadcast timed out")
+                else:
+                    loop.run_until_complete(self.broadcast_state())
+            except Exception as e:
+                logging.warning(f"Websim tick error: {e}")
+
+        except Exception as e:
+            logging.error(f"Error in WebSim tick: {e}")
+
+        self.sleep(0.5)
+
+    def sim(self, actions: List[Action]) -> None:
+        """
+        Handle simulation updates from LLM actions.
+        """
+        if not self._initialized:
+            return
+
+        try:
+            updated = False
+            with self._lock:
                 for action in actions:
                     if action.type == "move":
                         new_action = action.value
@@ -677,22 +683,12 @@ class WebSim(Simulator):
                             self.state.current_emotion = new_emotion
                             updated = True
 
-                self.state_dict = {
-                    "current_action": self.state.current_action,
-                    "last_speech": self.state.last_speech,
-                    "current_emotion": self.state.current_emotion,
-                    "system_latency": system_latency,
-                    "inputs": input_rezeroed,
-                }
-
-                logging.info(f"Inputs and LLM Outputs: {self.state_dict}")
-
             if updated:
-                self._last_tick = 0
+                # Trigger an immediate tick if an action was received
                 self.tick()
 
         except Exception as e:
-            logging.error(f"Error in sim update: {e}")
+            logging.error(f"Error in WebSim sim: {e}")
 
     async def cleanup(self):
         """

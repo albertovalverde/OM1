@@ -32,13 +32,13 @@
       openai_model: "gpt-4",
       personaplex_topic: "pepper/personaplex/control"
     }
-  ],
+  },
   agent_actions: [
     {
       name: "speak",
       llm_label: "hablar",
       implementation: "passthrough",
-      connector: "PersonaPlexSpeaker"
+      connector: "personaplex_zenoh"
     },
     {
       name: "move",

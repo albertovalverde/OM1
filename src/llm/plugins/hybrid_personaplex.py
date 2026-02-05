@@ -7,46 +7,49 @@ from llm import LLM, LLMConfig
 from llm.output_model import Action, CortexOutputModel
 from zenoh_msgs import open_zenoh_session
 
-class HybridPersonaPlexConfig(LLMConfig):
+from llm.plugins.openai_llm import OpenAILLM, OpenAIConfig
+
+class HybridPersonaPlexConfig(OpenAIConfig):
     """
     Configuration for Hybrid PersonaPlex + OpenAI Brain.
     """
-    openai_model: str = Field(default="gpt-4", description="Model for deep reasoning")
     personaplex_topic: str = Field(default="pepper/personaplex/control", description="Zenoh topic to talk to PersonaPlex")
 
-class HybridPersonaPlexLLM(LLM):
+class HybridPersonaPlexLLM(OpenAILLM):
     """
     The Orchestrator.
     Manages the persona (Moshi) for quick talk and OpenAI for heavy thinking.
     """
-    def __init__(self, config: HybridPersonaPlexConfig):
-        super().__init__(config)
+    def __init__(self, config: HybridPersonaPlexConfig, available_actions: T.Optional[T.List] = None):
+        super().__init__(config, available_actions)
         self.session = open_zenoh_session()
-        self.control_pub = self.session.declare_publisher(self.config.personaplex_topic)
-        logging.info("Hybrid PersonaPlex Orchestrator initialized")
+        self.control_pub = self.session.declare_publisher(self._config.personaplex_topic)
+        logging.info("Hybrid PersonaPlex Orchestrator initialized (System 1/2)")
 
-    async def ask(self, messages: T.List[T.Dict[str, str]], **kwargs) -> T.Optional[CortexOutputModel]:
+
+    async def ask(self, prompt: str, messages: T.List[T.Dict[str, str]] = []) -> T.Optional[CortexOutputModel]:
         """
         Decision loop:
-        1. Analyze user intention.
-        2. If complex -> Call OpenAI in background, tell PersonaPlex to say 'thinking...'.
-        3. If simple -> Let PersonaPlex handle it.
+        1. If it's a deep query -> Send 'thinking' to PersonaPlex and call OpenAI.
+        2. Otherwise -> Let PersonaPlex handle it (be silent in OM1 context).
         """
-        last_message = messages[-1]["content"] if messages else ""
-        
-        # LOGIC: Check if it requires deep reasoning
-        if "calcula" in last_message.lower() or "razona" in last_message.lower():
-            # Tactic: Send immediate command to PersonaPlex via Zenoh to make it talk (System 1)
+        # Detection of complex queries (simplified)
+        deep_keywords = ["calcula", "razona", "explica", "distancia", "por qué", "qué es"]
+        is_deep = any(kw in prompt.lower() for kw in deep_keywords)
+
+        if is_deep:
+            logging.info(f"System 2 (Deep Reasoning) triggered for: {prompt}")
+            
+            # Send immediate filler to PersonaPlex via Zenoh
             self.control_pub.put(json.dumps({
-                "command": "generate_filler",
-                "type": "thinking"
+                "command": "thinking_filler",
+                "text": "Déjame pensar un segundo sobre eso..."
             }))
             
-            # Tactic: Call OpenAI for the real answer (System 2)
-            # (Note: You would use an OpenAI client here)
-            logging.info("Deep reasoning triggered for: " + last_message)
-            
-            # Return a placeholder or the result once ready
-            return CortexOutputModel(actions=[Action(type="speak", value="Estoy analizando eso con cuidado...")])
-            
+            # Use OpenAI for the heavy lifting
+            return await super().ask(prompt, messages)
+        
+        # If simple, we stay silent to let Moshi (System 1) handle the verbal interaction
+        logging.info(f"System 1 (PersonaPlex) handling: {prompt}")
         return None
+

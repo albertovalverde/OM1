@@ -446,70 +446,59 @@ class CortexRuntime:
     async def _run_cortex_loop(self) -> None:
         """
         Execute the main cortex processing loop.
-
-        Runs continuously, managing the sleep/wake cycle and triggering
-        tick operations at the configured frequency.
-
-        Returns
-        -------
-        None
         """
+        logging.info("Main cortex loop started.")
         try:
             while True:
-                if not self.sleep_ticker_provider.skip_sleep:
-                    await self.sleep_ticker_provider.sleep(1 / self.config.hertz)
-
-                # Helper to yield control to event loop
-                await asyncio.sleep(0)
+                # Basic timing loop
+                await asyncio.sleep(1.0 / self.config.hertz)
+                
+                if self._is_reloading:
+                    continue
 
                 await self._tick()
-                self.sleep_ticker_provider.skip_sleep = False
+                
         except asyncio.CancelledError:
-            logging.info("Cortex loop cancelled, exiting gracefully")
+            logging.info("Cortex loop cancelled.")
             raise
         except Exception as e:
-            logging.error(f"Unexpected error in cortex loop: {e}")
+            logging.error(f"Error in cortex loop: {e}")
             raise
 
     async def _tick(self) -> None:
-        """
-        Execute a single tick of the cortex processing cycle.
-
-        Collects inputs, generates prompts, processes them through the LLM,
-        and triggers appropriate simulators and actions based on the output.
-
-        Returns
-        -------
-        None
-        """
+        """Execute a single tick of the cortex processing cycle."""
         try:
-            if self._is_reloading:
-                logging.debug("Skipping tick during config reload")
-                return
-
-            # Increment the tick counter at the start of each cycle
+            # Increment the tick counter
             tick_num = self.io_provider.increment_tick()
-            logging.debug(f"Processing tick #{tick_num}")
 
-            # collect all the latest inputs
-            finished_promises, _ = await self.action_orchestrator.flush_promises()
+            # 1. Collect results from finished actions
+            # We use a timeout to ensure we never hang here
+            try:
+                finished_promises, _ = await asyncio.wait_for(
+                    self.action_orchestrator.flush_promises(), 
+                    timeout=0.1
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                if isinstance(e, asyncio.TimeoutError):
+                    logging.debug("Promise flush timed out")
+                else:
+                    logging.error(f"Error flushing promises: {e}")
+                finished_promises = []
 
-            # combine those inputs into a suitable prompt
+            # 2. combine those inputs into a suitable prompt
             prompt = self.fuser.fuse(self.config.agent_inputs, finished_promises)
             if prompt is None:
-                logging.debug("No prompt to fuse")
                 return
 
-            # if there is a prompt, send to the AIs
+            # 3. Send to LLM (System 2)
+            # This is where the decisions are made
             output = await self.config.cortex_llm.ask(prompt)
             if output is None:
-                logging.debug("No output from LLM")
                 return
 
-            # Trigger the simulators
+            # 4. Trigger the simulators and actions
             await self.simulator_orchestrator.promise(output.actions)
-
-            # Trigger the actions
             await self.action_orchestrator.promise(output.actions)
+
         except Exception as error:
             logging.error(f"Error in cortex tick: {error}")

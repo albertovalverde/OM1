@@ -17,21 +17,26 @@ class PersonaPlexSpeakerConfig(ActionConfig):
 class PersonaPlexSpeakerConnector(ActionConnector[PersonaPlexSpeakerConfig, SpeakInput]):
     """
     Subscribes to audio from PersonaPlex via Zenoh and plays it on Pepper.
-    Also handles "Barge-in" (interrupting Pepper's speech).
     """
     def __init__(self, config: PersonaPlexSpeakerConfig):
         super().__init__(config)
         self.session = open_zenoh_session()
-        self.subscriber = self.session.declare_subscriber(self.config.topic, self._on_audio_data)
-        logging.info(f"PersonaPlex Speaker Proxy listening on {self.config.topic}")
-
-    def _on_audio_data(self, sample):
-        # Handle incoming audio chunk from PersonaPlex
-        # This is where you would play it via Pepper's ALAudioPlayer or similar.
-        pass
+        # Publisher to send text-to-speech to PersonaPlex if needed
+        self.text_pub = self.session.declare_publisher(self.config.topic + "/text")
+        logging.info(f"PersonaPlex Speaker Proxy ready on {self.config.topic}")
 
     async def connect(self, output_interface: SpeakInput) -> None:
-        # This is called if the LLM sends a 'speak' action.
-        # In a full-duplex setup, audio often flows directly from Zenoh.
-        # However, we can use this to send "text interventions" to PersonaPlex.
+        """
+        When the LLM (System 2) wants Pepper to speak.
+        We send the text to PersonaPlex so it can generate the audio with its voice.
+        """
+        text = output_interface.action
+        logging.info(f"Sending text to PersonaPlex Speaker: {text}")
+        
+        # Publish to PersonaPlex so it verbalizes the System 2 reasoning
+        self.text_pub.put(text)
+        
+        # We don't need to 'play' anything here if PersonaPlex handles audio.
+        # But this method being called ensures WebSim shows 'Speaking: ...'
         pass
+
